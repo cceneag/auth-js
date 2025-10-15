@@ -1,14 +1,13 @@
-name: Check pull requests
+name: 檢查拉取請求
 
 on:
   push:
-    branches-ignore: # Run the checks on all branches but the protected ones
-      - master
+    branches-ignore:
+      - main
       - release/*
-
-  pull_request_target:
+  pull_request:
     branches:
-      - master
+      - main
       - release/*
     types:
       - opened
@@ -16,32 +15,27 @@ on:
       - reopened
       - ready_for_review
 
-permissions: 
+permissions:
   contents: read
 
 jobs:
-  check-conventional-commits:
+  commitlint:
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]' # skip for dependabot PRs
-    env:
-      EVENT: ${{ toJSON(github.event) }}
+    if: github.actor != 'dependabot[bot]'
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github
+          fetch-depth: 0  # 拉取完整提交歷史
 
-      - if: ${{ github.event_name == 'pull_request_target' }}
-        run: |
-          set -ex
-          TMP_FILE=$(mktemp)
-          echo "${EVENT}" > "$TMP_FILE"
-          node .github/workflows/conventional-commits-lint.js pr "${TMP_FILE}"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
 
-      - if: ${{ github.event_name == 'push' }}
-        run: |
-          set -ex
+      - name: Install dependencies
+        run: npm install
 
-          TMP_FILE=$(mktemp)
-          echo "${EVENT}" > "$TMP_FILE"
-          node .github/workflows/conventional-commits-lint.js push "${TMP_FILE}"
+      - name: Run commitlint on PR commits
+        run: npx commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }} --verbose
