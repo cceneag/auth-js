@@ -23,13 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     if: github.actor != 'dependabot[bot]'
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 確保拉取完整 commit 歷史
+          fetch-depth: 0  # 拉取完整提交歷史
 
-      - name: Run Commitlint
-        uses: ahmadnassri/action-commit-lint@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          config: conventional
-          token: ${{ secrets.GITHUB_TOKEN }}
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run commitlint on PR commits
+        run: npx commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }} --verbose
