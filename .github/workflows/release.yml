@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 on:
   push:
@@ -7,13 +7,12 @@ on:
       - release/*
 
 jobs:
-  release_please:
+  release:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
       pull-requests: write
-
     steps:
       - uses: google-github-actions/release-please-action@v4
         id: release
@@ -26,236 +25,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract release version
-        if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
-        id: versions
+      - name: Determine version
+        if: ${{ steps.release.outputs }}
+        id: version
         run: |
           set -ex
-
-          RELEASE_CANDIDATE=true
-          if [ ""${{ steps.release.outputs.release_created }}"" == ""true"" ]; then
-            RELEASE_CANDIDATE=false
-          fi
-
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]; then
-            MAIN_RELEASE_VERSION=$(node -e ""console.log('${{ fromJSON(steps.release.outputs.pr).title }}'.split(' ').reverse().find(x => x.match(/[0-9]+\.[0-9]+\.[0-9]+/)))"")
-            RELEASE_VERSION=$MAIN_RELEASE_VERSION-rc.$(git describe --tags --exclude rc* | cut -d'-' -f2)
-            RELEASE_NAME=""rc$RELEASE_VERSION""
-          else
-            MAIN_RELEASE_VERSION=""${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}""
-            RELEASE_VERSION=""$MAIN_RELEASE_VERSION""
-            RELEASE_NAME=""v$RELEASE_VERSION""
-          fi
-
-          echo ""MAIN_RELEASE_VERSION=$MAIN_RELEASE_VERSION"" >> $GITHUB_ENV
-          echo ""RELEASE_VERSION=$RELEASE_VERSION"" >> $GITHUB_ENV
-          echo ""RELEASE_CANDIDATE=$RELEASE_CANDIDATE"" >> $GITHUB_ENV
-          echo ""RELEASE_NAME=$RELEASE_NAME"" >> $GITHUB_ENV
-
-      - uses: actions/setup-node@v4
-        if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
-        with:
-          node-version: 20
-
-      - name: Build and publish
-        if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
-        run: |
-          set -ex
-
-          echo ""export const version = '$RELEASE_VERSION'"" > src/lib/version.ts
-
-          npm ci
-          npm run build
-
-          for f in package.json package-lock.json; do
-            sed -i 's|""version"": ""0.0.0"",|""version"": ""'""$RELEASE_VERSION""'"",|g' ""$f""
-          done
-
-          echo '//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}' > ~/.npmrc
-
-          DIST_TAG=patched
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]; then
-            DIST_TAG=rc
-          elif [[ ""$GITHUB_REF"" == ""refs/heads/main"" || ""$GITHUB_REF"" == ""refs/heads/master"" ]]; then
-            DIST_TAG=latest
-          fi
-
-          npm publish --provenance --tag ""$DIST_TAG""
-
-          for f in package.json package-lock.json; do
-            sed -i 's|\(""name"":[[:space:]]*""@supabase/\)auth-js|\1gotrue-js|g' ""$f""
-          done
-
-          npm publish --provenance --tag ""$DIST_TAG""
-
-      - name: Create GitHub release and branch
-        if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
-        run: |
-          set -ex
-
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]; then
-            PR_NUMBER=""${{ fromJSON(steps.release.outputs.pr).number }}""
-            gh release create ""$RELEASE_NAME"" --title ""v$RELEASE_VERSION"" --prerelease -n ""This is a release candidate. See release-please PR #$PR_NUMBER for context.""
-            gh pr comment ""$PR_NUMBER"" -b ""Release candidate [v$RELEASE_VERSION](https://github.com/supabase/gotrue-js/releases/tag/$RELEASE_NAME) published.""
-          else
-            if [[ ""$GITHUB_REF"" == ""refs/heads/main"" || ""$GITHUB_REF"" == ""refs/heads/master"" ]]; then
-              IS_PATCH_ZERO=$(node -e ""console.log('$RELEASE_VERSION'.endsWith('.0'))"")
-              if [ ""$IS_PATCH_ZERO"" == ""true"" ]; then
-                gh api --method POST -H ""Accept: application/vnd.github+json"" -H ""X-GitHub-Api-Version: 2022-11-28"" /repos/supabase/gotrue-js/git/refs -f ""ref=refs/heads/release/${RELEASE_VERSION}"" -f ""sha=$GITHUB_SHA""
-              fi
-            fi
-          fi
-```
-
----
-
-這份 workflow 是根據你原本的邏輯整理過的，語法正確、縮排清晰，也加強了條件判斷的穩定性。如果你還有其他 repo 或 workflow 想一起整理，我也可以幫你一併優化！你想再加上測試流程或 CI 驗證嗎？"
-操作步驟請求與問題排查,2025-10-15T01:26:56,Human,\\恩
-操作步驟請求與問題排查,2025-10-15T01:26:23,AI,"Chi，你這段 GitHub Actions workflow 的 YAML 看起來是為了自動化 Go 專案的版本釋出流程，搭配 `release-please` 工具來管理版本號、建立 PR、發佈 npm 套件與 GitHub Release。你說「打不開」可能是 workflow 沒有成功執行或某些步驟出錯。這邊我幫你整理一下這段流程的結構和可能的問題點：
-
----
-
-### 🧩 Workflow 結構重點
-
-#### 📌 觸發條件
-```yaml
-on:
-  push:
-    branches:
-      - master
-      - release/*
-```
-只要 push 到 `master` 或 `release/*` 分支就會觸發。
-
-#### 🧪 Job: `release_please`
-```yaml
-jobs:
-  release_please:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      pull-requests: write
-```
-這個 job 有權限操作 GitHub 的內容與 PR。
-
----
-
-### ⚠️ 可能的問題點
-
-#### 1. **YAML 格式錯誤**
-你這段 YAML 有些縮排錯誤，例如：
-```yaml
-- uses:  googleapis/release-please-action
-- uses: google-github-actions/release-please-action@v4
-id: release
-with:
-  release-type: go
-```
-這段應該是同一個 step，正確格式應該是：
-```yaml
-- uses: google-github-actions/release-please-action@v4
-  id: release
-  with:
-    release-type: go
-    target-branch: ${{ github.ref_name }}
-```
-
-#### 2. **條件判斷語法錯誤**
-像這段：
-```yaml
-- if: ${{ steps.release.outputs }}
-```
-這樣寫會導致語法錯誤，因為 `steps.release.outputs` 是一個物件，不是布林值。你應該明確判斷某個欄位，例如：
-```yaml
-- if: ${{ steps.release.outputs.release_created == 'true' }}
-```
-
-#### 3. **Node.js 腳本錯誤風險**
-你用 `node -e` 來解析 PR title 取得版本號，這段如果 PR title 格式不一致或 `steps.release.outputs.pr` 為空，會導致錯誤。
-
----
-
-### ✅ 建議修正步驟
-
-1. **修正 YAML 縮排與語法**
-2. **確認 `release-please-action` 的使用方式是否正確（只需要用 `google-github-actions/release-please-action@v4`）**
-3. **加上 `continue-on-error: true` 來測試哪個步驟出錯**
-4. **在 GitHub Actions 的「調試資訊」頁面查看錯誤訊息**
-
----
-
-如果你願意，我可以幫你重寫一份乾淨、格式正確的 workflow，讓你直接貼上測試。你想要我幫你整理嗎？"
-操作步驟請求與問題排查,2025-10-15T01:26:23,Human,"name: Release
-
-on:
-  push:
-    branches:
-      - master
-      - release/*
-
-jobs:
-  release_please:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      pull-requests: write
-    steps:
-          - uses:  googleapis/release-please-action
-         - uses: google-github-actions/release-please-action@v4
-  id: release
-  with:
-    release-type: go
-    target-branch: ${{ github.ref_name }}
-      - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
-        with:
-          fetch-depth: 0
-
-      - if: ${{ steps.release.outputs }}
-        id: versions
-        run: |
-          set -ex
-
           RELEASE_CANDIDATE=true
           NOT_RELEASE_CANDIDATE='${{ steps.release.outputs.release_created }}'
-          if [ ""$NOT_RELEASE_CANDIDATE"" == ""true"" ]
-          then
+          if [ "$NOT_RELEASE_CANDIDATE" == "true" ]; then
             RELEASE_CANDIDATE=false
           fi
-
-          MAIN_RELEASE_VERSION=x
-          RELEASE_VERSION=y
-
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]
-          then
-            # Release please doesn't tell you the candidate version when it
-            # creates the PR, so we have to take it from the title.
-            MAIN_RELEASE_VERSION=$(node -e ""console.log('${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).title }}'.split(' ').reverse().find(x => x.match(/[0-9]+[.][0-9]+[.][0-9]+/)))"")
-
-            # Use git describe tags to identify the number of commits the branch
-            # is ahead of the most recent non-release-candidate tag, which is
-            # part of the rc.<commits> value.
-            RELEASE_VERSION=$MAIN_RELEASE_VERSION-rc.$(node -e ""console.log('$(git describe --tags --exclude rc*)'.split('-')[1])"")
-
-            # release-please only ignores releases that have a form like [A-Z0-9]<version>, so prefixing with rc<version>
-            RELEASE_NAME=""rc$RELEASE_VERSION""
+          MAIN_RELEASE_VERSION=""
+          RELEASE_VERSION=""
+          if [ "$RELEASE_CANDIDATE" == "true" ]; then
+            # Extract version from PR title for release candidate
+            MAIN_RELEASE_VERSION=$(node -e "console.log('${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).title }}'.split(' ').reverse().find(x => x.match(/[0-9]+[.][0-9]+[.][0-9]+/)))" || echo "Failed to extract version" >&2)
+            if [ -z "$MAIN_RELEASE_VERSION" ]; then
+              echo "Error: Could not extract MAIN_RELEASE_VERSION" >&2
+              exit 1
+            fi
+            # Use git describe to get commit count for RC tag
+            GIT_DESCRIBE=$(git describe --tags --exclude 'rc*' || echo "Failed to describe tags" >&2)
+            COMMIT_COUNT=$(echo "$GIT_DESCRIBE" | cut -d'-' -f2 || echo "0")
+            RELEASE_VERSION="$MAIN_RELEASE_VERSION-rc.$COMMIT_COUNT"
+            RELEASE_NAME="rc$RELEASE_VERSION"
           else
             MAIN_RELEASE_VERSION=${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}
-            RELEASE_VERSION=""$MAIN_RELEASE_VERSION""
-            RELEASE_NAME=""v$RELEASE_VERSION""
+            RELEASE_VERSION="$MAIN_RELEASE_VERSION"
+            RELEASE_NAME="v$RELEASE_VERSION"
           fi
-
-          echo ""MAIN_RELEASE_VERSION=${MAIN_RELEASE_VERSION}"" >> ""${GITHUB_ENV}""
-          echo ""RELEASE_VERSION=${RELEASE_VERSION}"" >> ""${GITHUB_ENV}""
-          echo ""RELEASE_CANDIDATE=${RELEASE_CANDIDATE}"" >> ""${GITHUB_ENV}""
-          echo ""RELEASE_NAME=${RELEASE_NAME}"" >> ""${GITHUB_ENV}""
-
-          echo ""MAIN_RELEASE_VERSION=${MAIN_RELEASE_VERSION}"" >> ""${GITHUB_OUTPUT}""
-          echo ""RELEASE_VERSION=${RELEASE_VERSION}"" >> ""${GITHUB_OUTPUT}""
-          echo ""RELEASE_CANDIDATE=${RELEASE_CANDIDATE}"" >> ""${GITHUB_OUTPUT}""
-          echo ""RELEASE_NAME=${RELEASE_NAME}"" >> ""${GITHUB_OUTPUT}""
+          echo "MAIN_RELEASE_VERSION=$MAIN_RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_CANDIDATE=$RELEASE_CANDIDATE" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_ENV"
+          echo "MAIN_RELEASE_VERSION=$MAIN_RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_CANDIDATE=$RELEASE_CANDIDATE" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
@@ -266,77 +72,70 @@ jobs:
         if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
         run: |
           set -ex
-
-          echo ""export const version = '$RELEASE_VERSION'"" > src/lib/version.ts
-
+          echo "export const version = '$RELEASE_VERSION'" > src/lib/version.ts
           npm ci
           npm run build
-
-          for f in package.json package-lock.json
-          do
-            sed -i 's|""version"": ""0.0.0"",|""version"": ""'""$RELEASE_VERSION""'"",|g' ""$f""
+          for f in package.json package-lock.json; do
+            if [ -f "$f" ]; then
+              sed -i "s|\"version\": \".*\"|\"version\": \"$RELEASE_VERSION\"|g" "$f"
+            else
+              echo "Error: $f not found" >&2
+              exit 1
+            fi
           done
-
           echo '//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}' > ~/.npmrc
-
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "Error: NPM_TOKEN is not set" >&2
+            exit 1
+          fi
           DIST_TAG=patched
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]
-          then
+          if [ "$RELEASE_CANDIDATE" == "true" ]; then
             DIST_TAG=rc
-          elif [ ""$GITHUB_REF"" == ""refs/heads/main"" ] || [ ""$GITHUB_REF"" == ""refs/heads/master"" ]
-          then
-            # This is the main branch and it's not a prerelease, so the dist-tag should be `latest`.
+          elif [ "$GITHUB_REF" == "refs/heads/main" ] || [ "$GITHUB_REF" == "refs/heads/master" ]; then
             DIST_TAG=latest
           fi
-
-          echo ""Publishing auth-js now...""
-
-          npm publish --provenance --tag ""$DIST_TAG""
-
-          echo ""Publishing gotrue-js now...""
-
-          for f in package.json package-lock.json
-          do
-            # only replace name not repository, homepage, etc.
-            sed -i 's|\(""name"":[[:space:]]*""@supabase/\)auth-js|\1gotrue-js|g' ""$f""
+          echo "Publishing auth-js..."
+          npm publish --provenance --tag "$DIST_TAG"
+          echo "Publishing gotrue-js..."
+          for f in package.json package-lock.json; do
+            if [ -f "$f" ]; then
+              sed -i 's|\("name":\s*"@supabase/\)auth-js|\1gotrue-js|g' "$f"
+            else
+              echo "Error: $f not found" >&2
+              exit 1
+            fi
           done
+          npm publish --provenance --tag "$DIST_TAG"
 
-          npm publish --provenance --tag ""$DIST_TAG""
-
-      - name: Create GitHub release and branches
+      - name: Create GitHub release and branch
         if: ${{ steps.release.outputs.release_created == 'true' || steps.release.outputs.prs_created == 'true' }}
         run: |
           set -ex
-
-          if [ ""$RELEASE_CANDIDATE"" == ""true"" ]
-          then
-                          PR_NUMBER='${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}'
-
-            GH_TOKEN='${{ github.token }}' gh release \
-              create $RELEASE_NAME \
-              --title ""v$RELEASE_VERSION"" \
+          if [ "$RELEASE_CANDIDATE" == "true" ]; then
+            PR_NUMBER='${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}'
+            if [ -z "$PR_NUMBER" ]; then
+              echo "Error: PR_NUMBER could not be determined" >&2
+              exit 1
+            fi
+            gh release create "$RELEASE_NAME" \
+              --title "v$RELEASE_VERSION" \
               --prerelease \
-              -n ""This is a release candidate. See release-please PR #$PR_NUMBER for context.""
-
-            GH_TOKEN='${{ github.token }}' gh pr comment ""$PR_NUMBER"" \
-              -b ""Release candidate [v$RELEASE_VERSION](https://github.com/supabase/gotrue-js/releases/tag/$RELEASE_NAME) published.""
+              -n "This is a release candidate. See release PR #$PR_NUMBER for context."
+            gh pr comment "$PR_NUMBER" \
+              -b "Release candidate [v$RELEASE_VERSION](https://github.com/supabase/gotrue-js/releases/tag/$RELEASE_NAME) has been published."
           else
-            if [ ""$GITHUB_REF"" == ""refs/heads/main"" ] || [ ""$GITHUB_REF"" == ""refs/heads/master"" ]
-            then
-              IS_PATCH_ZERO=$(node -e ""console.log('$RELEASE_VERSION'.endsWith('.0'))"")
-
-              if [ ""$IS_PATCH_ZERO"" == ""true"" ]
-              then
-                # Only create release branch if patch version is 0, as this
-                # means that the release can be patched in the future.
-
-                GH_TOKEN='${{ github.token }}' gh api \
+            if [ "$GITHUB_REF" == "refs/heads/main" ] || [ "$GITHUB_REF" == "refs/heads/master" ]; then
+              IS_PATCH_ZERO=$(node -e "console.log('$RELEASE_VERSION'.endsWith('.0'))")
+              if [ "$IS_PATCH_ZERO" == "true" ]; then
+                gh api \
                   --method POST \
-                  -H ""Accept: application/vnd.github+json"" \
-                  -H ""X-GitHub-Api-Version: 2022-11-28"" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
                   /repos/supabase/gotrue-js/git/refs \
-                  -f ""ref=refs/heads/release/${RELEASE_VERSION}"" \
-                  -f ""sha=$GITHUB_SHA""
-                fi
+                  -f "ref=refs/heads/release/${RELEASE_VERSION}" \
+                  -f "sha=$GITHUB_SHA"
               fi
-          fi"
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
